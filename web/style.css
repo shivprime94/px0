@@ -773,3 +773,53 @@ kbd {
 #minimap-hits { position: absolute; top: 0; right: 0; bottom: 0; width: 12px; pointer-events: auto; z-index: 6; }
 #minimap-hits:empty { pointer-events: none; }
 #minimap-hits i { position: absolute; right: 2px; width: 8px; height: 2px; background: var(--mark-active); border-radius: 1px; opacity: .85; }
+
+/* ---- Review comments ---------------------------------------------------- */
+/* Gutter marker: a dot on the line-number cell of a commented line. */
+.g.has-cmt::before {
+  content: ""; position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+.g.has-cmt.stale::before { background: var(--err); }
+
+/* Comment tab open-count badge. */
+.itab-count {
+  margin-left: 5px; font: 10px var(--mono); color: var(--on-badge);
+  background: var(--accent); border-radius: 8px; padding: 0 5px; vertical-align: middle;
+}
+
+/* Floating popovers: composer (create) and view (read). */
+.cmt-pop {
+  position: fixed; z-index: 40; width: 320px; max-width: calc(100vw - 24px);
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow-sm); padding: 10px; box-sizing: border-box;
+}
+#cmt-composer { right: 16px; bottom: 44px; }
+.cmt-pop-ref { font: 11px var(--mono); color: var(--faint); margin-bottom: 6px; }
+#cmt-text {
+  width: 100%; min-height: 72px; resize: vertical; box-sizing: border-box;
+  font: var(--fs) var(--ui); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 5px; padding: 7px 8px;
+}
+#cmt-text:focus { outline: none; border-color: var(--accent); }
+.cmt-pop-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.footer-btn.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+
+/* Comment cards (in the view popover and the panel list). */
+.cmt-item { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+#cmt-list .cmt-item { cursor: pointer; }
+#cmt-list .cmt-item:hover { background: var(--bg3); }
+.cmt-item-head { display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--faint); }
+.cmt-id { color: var(--accent-fg); }
+.cmt-loc { color: var(--faint); }
+.cmt-stale {
+  margin-left: auto; font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--on-accent); background: var(--err); border-radius: 6px; padding: 0 5px;
+}
+.cmt-body { margin: 5px 0; color: var(--fg); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
+.cmt-item-actions { display: flex; gap: 6px; }
+.cmt-mini {
+  font: 10px var(--ui); color: var(--faint); background: var(--bg3);
+  border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; cursor: pointer;
+}
+.cmt-mini:hover { color: var(--fg); border-color: var(--accent); }

@@ -175,6 +175,11 @@
         c.hidden = true;
       return;
     }
+    if (d.path !== commentDocPath) {
+      commentDocPath = d.path;
+      rebuildCommentLines();
+      refreshComments();
+    }
     const top = vp.scrollTop;
     const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
     const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
@@ -195,6 +200,9 @@
         if (gut.dels.has(n))
           rc += " gut-del";
       }
+      const cm = commentLines.get(n);
+      if (cm)
+        gc += cm.stale ? " has-cmt stale" : " has-cmt";
       html += '<div class="' + rc + '" data-l="' + n + '">' + '<div class="' + gc + '">' + n + '</div><div class="c">' + (body === undefined ? "" : body) + "</div></div>";
     }
     const sel = saveSelection();
@@ -1049,12 +1057,15 @@
     $("#pane-right-symbols")?.classList.toggle("active", tab === "symbols");
     $("#pane-right-calls")?.classList.toggle("active", tab === "calls");
     $("#pane-right-search")?.classList.toggle("active", tab === "search");
+    $("#pane-right-comments")?.classList.toggle("active", tab === "comments");
     if (tab === "symbols") {
       loadOutline();
       $("#right-symbols-filter")?.focus();
     }
     if (tab === "search")
       $("#q")?.focus();
+    if (tab === "comments")
+      refreshComments();
   }
   function renderRightResults(word, hits, server, isExact) {
     const targetEl = $("#right-ref-target");
@@ -2786,7 +2797,7 @@
   // web/src/selbar.js
   var status = $("#status");
   var statsEl = $("#sel-stats");
-  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages" };
+  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages", KeyK: "comment" };
   var current = null;
   var allText = null;
   var allInfo = null;
@@ -2903,6 +2914,8 @@
 ` + text + "\n```", "Copied snippet for Agent (" + ref + ")");
     } else if (act === "usages") {
       findReferences(text.split(/\s+/)[0] || text);
+    } else if (act === "comment") {
+      openCommentComposer(current);
     } else {
       return false;
     }
@@ -3922,6 +3935,213 @@
     });
   }
 
+  // web/src/comments.js
+  var allComments = [];
+  var commentLines = new Map(); // line -> {stale, comments:[...]} for the current doc
+  var commentDocPath = null;
+  var commentStream = null;
+  async function postJSON(path, obj) {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+    if (!r.ok)
+      throw new Error((await r.text()) || r.statusText);
+    return r.status === 204 ? null : r.json();
+  }
+  function rebuildCommentLines() {
+    commentLines = new Map();
+    for (const c of allComments) {
+      if (c.status !== "open" || c.file !== commentDocPath)
+        continue;
+      const cur = commentLines.get(c.lineStart) || { stale: false, comments: [] };
+      cur.comments.push(c);
+      if (c.stale)
+        cur.stale = true;
+      commentLines.set(c.lineStart, cur);
+    }
+  }
+  async function refreshComments() {
+    try {
+      const j = await api("/api/comments");
+      allComments = j.comments || [];
+    } catch {
+      allComments = [];
+    }
+    rebuildCommentLines();
+    renderCommentsPanel();
+    render();
+  }
+  function openCount() {
+    return allComments.filter((c) => c.status === "open").length;
+  }
+  function displayLoc(c) {
+    return c.file + ":" + (c.lineEnd > c.lineStart ? c.lineStart + "-" + c.lineEnd : c.lineStart);
+  }
+  function renderCommentsPanel() {
+    const countEl = $("#cmt-tab-count");
+    if (countEl) {
+      const n = openCount();
+      countEl.textContent = n;
+      countEl.hidden = n === 0;
+    }
+    const listEl = $("#cmt-list");
+    if (!listEl)
+      return;
+    const open = allComments.filter((c) => c.status === "open");
+    if (!open.length) {
+      listEl.innerHTML = '<div class="hint">No open comments. Select code and press <b data-keys="Alt+K"></b> to add one.</div>';
+      applyKeyLabels();
+      return;
+    }
+    const byFile = new Map();
+    for (const c of open)
+      (byFile.get(c.file) || byFile.set(c.file, []).get(c.file)).push(c);
+    let html = "";
+    for (const [file, cs] of byFile) {
+      html += '<div class="rfile" title="' + esc(file) + '"><span class="fp">' + esc(displayPath(file)) + '</span><span class="cnt">' + cs.length + "</span></div>";
+      for (const c of cs) {
+        html += '<div class="cmt-item" data-p="' + esc(c.file) + '" data-n="' + c.lineStart + '">' + '<div class="cmt-item-head"><span class="cmt-id">[' + esc(c.id) + "]</span> <span class=\"cmt-loc\">:" + (c.lineEnd > c.lineStart ? c.lineStart + "-" + c.lineEnd : c.lineStart) + "</span>" + (c.stale ? '<span class="cmt-stale">stale</span>' : "") + "</div>" + '<div class="cmt-body">' + esc(c.body) + "</div>" + '<div class="cmt-item-actions"><button class="cmt-mini" data-cmt-resolve="' + esc(c.id) + '">Resolve</button><button class="cmt-mini" data-cmt-delete="' + esc(c.id) + '">Delete</button></div>' + "</div>";
+      }
+    }
+    listEl.innerHTML = html;
+  }
+  function closeCommentPops() {
+    const comp = $("#cmt-composer"), view = $("#cmt-view");
+    if (comp)
+      comp.hidden = true;
+    if (view)
+      view.hidden = true;
+  }
+  var composerInfo = null;
+  function openCommentComposer(info) {
+    composerInfo = info;
+    const comp = $("#cmt-composer");
+    if (!comp)
+      return;
+    $("#cmt-view").hidden = true;
+    $("#cmt-composer-ref").textContent = info.path + ":" + (info.l1 === info.l2 ? info.l1 : info.l1 + "-" + info.l2);
+    const ta = $("#cmt-text");
+    ta.value = "";
+    comp.hidden = false;
+    ta.focus();
+  }
+  async function saveComposer() {
+    if (!composerInfo)
+      return;
+    const body = $("#cmt-text").value.trim();
+    if (!body) {
+      showToast("!", "Comment is empty");
+      return;
+    }
+    try {
+      await postJSON("/api/comments", { file: composerInfo.path, lineStart: composerInfo.l1, lineEnd: composerInfo.l2, snippet: composerInfo.text, body });
+      closeCommentPops();
+      composerInfo = null;
+      showToast("✓", "Comment added");
+      await refreshComments();
+    } catch (e) {
+      showToast("!", "Could not save comment: " + e.message);
+    }
+  }
+  function openCommentView(line, anchorEl) {
+    const cur = commentLines.get(line);
+    if (!cur)
+      return;
+    const view = $("#cmt-view");
+    if (!view)
+      return;
+    $("#cmt-composer").hidden = true;
+    let html = "";
+    for (const c of cur.comments) {
+      html += '<div class="cmt-item"><div class="cmt-item-head"><span class="cmt-id">[' + esc(c.id) + "]</span> <span class=\"cmt-loc\">" + esc(displayLoc(c)) + "</span>" + (c.stale ? '<span class="cmt-stale">stale</span>' : "") + "</div>" + '<div class="cmt-body">' + esc(c.body) + "</div>" + '<div class="cmt-item-actions"><button class="cmt-mini" data-cmt-resolve="' + esc(c.id) + '">Resolve</button><button class="cmt-mini" data-cmt-delete="' + esc(c.id) + '">Delete</button></div></div>';
+    }
+    view.innerHTML = html;
+    view.hidden = false;
+    const r = anchorEl.getBoundingClientRect();
+    view.style.top = Math.min(r.bottom + 4, window.innerHeight - view.offsetHeight - 8) + "px";
+    view.style.left = Math.min(r.left, window.innerWidth - view.offsetWidth - 8) + "px";
+  }
+  async function resolveComment(id) {
+    try {
+      await postJSON("/api/comments/resolve", { id });
+      closeCommentPops();
+      await refreshComments();
+    } catch (e) {
+      showToast("!", "Could not resolve: " + e.message);
+    }
+  }
+  async function deleteComment(id) {
+    try {
+      const r = await fetch("/api/comments?id=" + encodeURIComponent(id), { method: "DELETE" });
+      if (!r.ok)
+        throw new Error(r.statusText);
+      closeCommentPops();
+      await refreshComments();
+    } catch (e) {
+      showToast("!", "Could not delete: " + e.message);
+    }
+  }
+  function initComments() {
+    $("#cmt-save")?.addEventListener("click", saveComposer);
+    $("#cmt-cancel")?.addEventListener("click", () => { closeCommentPops(); composerInfo = null; });
+    $("#cmt-text")?.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        saveComposer();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeCommentPops();
+        composerInfo = null;
+      }
+    });
+    // Click a gutter marker to view the comments anchored there.
+    rowsEl.addEventListener("click", (e) => {
+      const g = e.target.closest(".g.has-cmt");
+      if (!g)
+        return;
+      const row = g.closest(".row");
+      if (row)
+        openCommentView(+row.dataset.l, g);
+    });
+    // Resolve / delete actions inside either popover or the panel.
+    document.addEventListener("click", (e) => {
+      const res = e.target.closest("[data-cmt-resolve]");
+      if (res) {
+        resolveComment(res.dataset.cmtResolve);
+        return;
+      }
+      const del = e.target.closest("[data-cmt-delete]");
+      if (del) {
+        deleteComment(del.dataset.cmtDelete);
+        return;
+      }
+      // Jump to a comment from the panel list.
+      const item = e.target.closest("#cmt-list .cmt-item");
+      if (item && item.dataset.p) {
+        openFile(item.dataset.p, { line: +item.dataset.n });
+        return;
+      }
+      // Dismiss the view popover when clicking elsewhere.
+      const view = $("#cmt-view");
+      if (view && !view.hidden && !e.target.closest("#cmt-view") && !e.target.closest(".g.has-cmt"))
+        view.hidden = true;
+      // Dismiss the composer on an outside click. Guard the selection toolbar so
+      // the very click that opens it (the Comment button) does not close it.
+      const comp = $("#cmt-composer");
+      if (comp && !comp.hidden && !e.target.closest("#cmt-composer") && !e.target.closest("#footer-sel")) {
+        comp.hidden = true;
+        composerInfo = null;
+      }
+    });
+    $("#cmt-copy-instruction")?.addEventListener("click", () => {
+      copyToClipboard("Read .px0/review.md and apply every open review comment. After applying each one, run: px0 resolve <id>", "Copied agent instruction");
+    });
+    // Live-update: the agent resolving from the CLI changes comments.json.
+    try {
+      commentStream = new EventSource("/api/comments/stream");
+      commentStream.addEventListener("change", () => refreshComments());
+    } catch {}
+    refreshComments();
+  }
+
   // web/src/main.js
   initRenderer();
   initTabs();
@@ -3933,6 +4153,7 @@
   initOutline();
   initPanels();
   initInspector();
+  initComments();
   initCalls();
   initFind();
   initPalette();

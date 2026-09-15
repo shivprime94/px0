@@ -6,7 +6,7 @@ px0 is a fast, ultra-light, remote-first, read-only IDE designed for instant cod
 
 More and more code generation happens directly in the terminal—driven by coding agents, CLI tools, and background orchestrators. Developers spend significantly less time typing boilerplate and more time reviewing, auditing, and navigating.
 
-Because speed of access is everything when inspecting code, **px0 is obsessively optimized for reads—and is strictly read-only at the moment.** You don't need a heavy editing environment with background extension churn just to verify code; you need a sub-millisecond, zero-latency window into the repository, especially across remote machines.
+Because speed of access is everything when inspecting code, **px0 is obsessively optimized for reads and never edits your source.** The only thing it writes is review comments, kept in a `.px0/` sidecar directory (see [Review Comments](#review-comments-for-your-agent) below); your tracked files are never touched. You don't need a heavy editing environment with background extension churn just to verify code; you need a sub-millisecond, zero-latency window into the repository, especially across remote machines.
 
 ### Where px0 fits in best:
 
@@ -14,6 +14,34 @@ Because speed of access is everything when inspecting code, **px0 is obsessively
 - **Remote & Cloud Server Inspection**: Spin up on any remote server, VM, or CI runner and browse the codebase instantly from your local browser—no SSH keys, no port forwarding hassle, and no heavy remote desktop/daemons.
 - **Auditing Large Repositories**: Read through massive, 50,000+ file codebases on a laptop without background indexers hogging RAM or spinning up fans.
 - **Sidecar to Terminal Editors**: Keep lightweight editors (like Vim, Neovim, or Helix) in the terminal for typing, while using px0 as a high-density, rich graphical inspection and diff console.
+
+## Review Comments for Your Agent
+
+Stop copy-pasting code into your agent to explain what to change. Review in px0, mark up the lines that need work, and hand your agent the comments.
+
+1. **Select code** in any file (or the diff view) and press `Alt+K` (or click **Comment** in the selection toolbar). Type a note and save with `Cmd/Ctrl+Enter`.
+2. Commented lines get a **gutter marker**; the **Comments** tab in the right inspector lists every open comment, jumps to any of them, and has a one-click **Copy agent instruction** button.
+3. Comments are stored locally in `.px0/` and rendered to **`.px0/review.md`**, a self-contained file with each comment's id, location, the exact code snippet, and a `STALE` flag if the code has since moved:
+
+   ```markdown
+   ## [c1] server.go:64
+   ```go
+   s.mux.HandleFunc("/api/diff", s.handleDiff)
+   ```
+   rename handleDiff → handleGitDiff
+   ```
+
+4. Point your agent at it: *"Read `.px0/review.md` and apply every open comment. After each, run `px0 resolve <id>`."* As the agent resolves comments, the px0 UI **checks them off live**.
+
+Agent-facing commands (no server required):
+
+```bash
+px0 review          # print open comments (review.md) to stdout
+px0 review --json   # same, as JSON
+px0 resolve <id>    # mark a comment resolved
+```
+
+`.px0/` is kept out of git automatically (added to the repo's `.git/info/exclude`), so review notes stay local to you.
 
 ## Installation
 
