@@ -178,7 +178,7 @@
     if (d.path !== commentDocPath) {
       commentDocPath = d.path;
       rebuildCommentLines();
-      refreshCommentsForDoc(d.path);
+      refreshComments();
     }
     const top = vp.scrollTop;
     const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
@@ -3969,10 +3969,6 @@
     renderCommentsPanel();
     render();
   }
-  // Fire-and-forget refresh when the active document changes.
-  function refreshCommentsForDoc() {
-    refreshComments();
-  }
   function openCount() {
     return allComments.filter((c) => c.status === "open").length;
   }
@@ -4127,6 +4123,13 @@
       const view = $("#cmt-view");
       if (view && !view.hidden && !e.target.closest("#cmt-view") && !e.target.closest(".g.has-cmt"))
         view.hidden = true;
+      // Dismiss the composer on an outside click. Guard the selection toolbar so
+      // the very click that opens it (the Comment button) does not close it.
+      const comp = $("#cmt-composer");
+      if (comp && !comp.hidden && !e.target.closest("#cmt-composer") && !e.target.closest("#footer-sel")) {
+        comp.hidden = true;
+        composerInfo = null;
+      }
     });
     $("#cmt-copy-instruction")?.addEventListener("click", () => {
       copyToClipboard("Read .px0/review.md and apply every open review comment. After applying each one, run: px0 resolve <id>", "Copied agent instruction");
