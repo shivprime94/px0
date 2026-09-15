@@ -161,6 +161,18 @@ func TestReanchorStaleWhenGone(t *testing.T) {
 	}
 }
 
+func TestReanchorPartialLineSelection(t *testing.T) {
+	// A real selection is often a substring of a line, not a whole line.
+	root := t.TempDir()
+	writeFile(t, root, "a.go", "package main\nfunc greet() string { return \"hi\" }\n")
+	s := newStore(root)
+	c := Comment{File: "a.go", LineStart: 2, LineEnd: 2, Snippet: "greet"}
+	s.reanchor(&c)
+	if c.Stale || c.LineStart != 2 {
+		t.Fatalf("partial-line snippet should anchor to line 2, got stale=%v line=%d", c.Stale, c.LineStart)
+	}
+}
+
 func TestReanchorEmptySnippetNeverStale(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "a.go", "package main\n")

@@ -71,6 +71,11 @@ func (s *store) load() (commentsFile, error) {
 // regenerates the agent-facing review.md and makes sure .px0/ is ignored in the
 // target repo.
 func (s *store) save(cf commentsFile) error {
+	// Re-anchor before persisting so the stored line numbers and the agent-facing
+	// review.md reflect the file's current state (Stale flags included).
+	for i := range cf.Comments {
+		s.reanchor(&cf.Comments[i])
+	}
 	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
 		return err
 	}
@@ -191,8 +196,10 @@ func (s *store) list() ([]Comment, error) {
 
 // reanchor recomputes a comment's line range and Stale flag against the current
 // file. The stored snippet is the anchor of record: line numbers drift as the
-// code is edited, so we trust the snippet's text over the stored line numbers.
-// Callers already hold s.mu; reanchor takes no lock.
+// code is edited, so we trust the snippet's exact text over the stored line
+// numbers. Matching is by substring (not whole lines) so partial-line and
+// multi-line selections both anchor correctly. Callers already hold s.mu;
+// reanchor takes no lock.
 func (s *store) reanchor(c *Comment) {
 	if strings.TrimSpace(c.Snippet) == "" {
 		c.Stale = false
@@ -203,32 +210,15 @@ func (s *store) reanchor(c *Comment) {
 		c.Stale = true
 		return
 	}
-	lines := strings.Split(string(b), "\n")
-	want := strings.Split(c.Snippet, "\n")
-	matchesAt := func(start int) bool { // start is 0-based
-		if start < 0 || start+len(want) > len(lines) {
-			return false
-		}
-		for i, w := range want {
-			if lines[start+i] != w {
-				return false
-			}
-		}
-		return true
-	}
-	if matchesAt(c.LineStart - 1) {
-		c.Stale = false
+	content := string(b)
+	idx := strings.Index(content, c.Snippet)
+	if idx < 0 {
+		c.Stale = true
 		return
 	}
-	for start := 0; start+len(want) <= len(lines); start++ {
-		if matchesAt(start) {
-			c.LineStart = start + 1
-			c.LineEnd = start + len(want)
-			c.Stale = false
-			return
-		}
-	}
-	c.Stale = true
+	c.LineStart = 1 + strings.Count(content[:idx], "\n")
+	c.LineEnd = c.LineStart + strings.Count(c.Snippet, "\n")
+	c.Stale = false
 }
 
 // mdLang maps a file extension to a Markdown fence language for review.md.
