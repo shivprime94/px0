@@ -7,6 +7,9 @@ px0
 # Go
 *.out
 
+# px0 review comments (local scratchpad between reviewer and agent)
+.px0/
+
 # IDE/Editor
 .vscode/
 .idea/
