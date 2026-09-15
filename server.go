@@ -40,6 +40,7 @@ type Server struct {
 	ix  *Index
 	lsp *lspManager
 	mux *http.ServeMux
+	cm  *store // review-comment store, rooted at the served repo
 
 	lastReq atomic.Int64 // unix nanos of the most recent request
 }
@@ -48,7 +49,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	if lsp == nil {
 		lsp = newLSPManager(ix.Root(), false)
 	}
-	s := &Server{ix: ix, lsp: lsp, mux: http.NewServeMux()}
+	s := &Server{ix: ix, lsp: lsp, mux: http.NewServeMux(), cm: newStore(ix.Root())}
 	sub, _ := fs.Sub(assets, "web")
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 	s.mux.HandleFunc("/static/themes.css", s.handleThemes)
@@ -62,6 +63,9 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/raw", s.handleRaw)
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
+	s.mux.HandleFunc("/api/comments", s.handleComments)
+	s.mux.HandleFunc("/api/comments/resolve", s.handleCommentsResolve)
+	s.mux.HandleFunc("/api/comments/stream", s.handleCommentsStream)
 	s.mux.HandleFunc("/api/gutter", s.handleGutter)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
@@ -107,7 +111,10 @@ func (s *Server) scavenge() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.lastReq.Store(time.Now().UnixNano())
 	w.Header().Set("Cache-Control", "no-store")
-	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+	// Server-Sent Events must stream unbuffered, so skip gzip for the stream
+	// endpoint: gzipWriter embeds the ResponseWriter interface and does not
+	// expose the underlying http.Flusher, and gzip buffering would stall events.
+	if r.URL.Path == "/api/comments/stream" || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		s.mux.ServeHTTP(w, r)
 		return
 	}

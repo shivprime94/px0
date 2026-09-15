@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -59,6 +60,16 @@ func main() {
 	if *showVer || *showVerShort || (flag.NArg() == 1 && flag.Arg(0) == "version") {
 		fmt.Printf("px0 %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+
+	// Review-comment subcommands run against the current repo without a server.
+	if flag.NArg() >= 1 {
+		switch flag.Arg(0) {
+		case "review":
+			os.Exit(runReview(flag.Args()[1:]))
+		case "resolve":
+			os.Exit(runResolve(flag.Args()[1:]))
+		}
 	}
 
 	if *doUpdate {
@@ -347,4 +358,62 @@ func isWSL() bool {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "px0:", err)
 	os.Exit(1)
+}
+
+// cliRoot resolves the repo root for the review/resolve subcommands from the
+// current working directory, matching the root the server would serve.
+func cliRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	if info := gitProbe(cwd); info.ok && info.toplevel != "" {
+		return info.toplevel
+	}
+	return cwd
+}
+
+// runReview prints open review comments — as review.md text, or as JSON with
+// --json for programmatic agents. Returns a process exit code.
+func runReview(args []string) int {
+	s := newStore(cliRoot())
+	cs, err := s.list()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "px0:", err)
+		return 1
+	}
+	for _, a := range args {
+		if a == "--json" {
+			b, _ := json.MarshalIndent(cs, "", "  ")
+			fmt.Println(string(b))
+			return 0
+		}
+	}
+	fmt.Print(renderReviewMarkdown(cs))
+	return 0
+}
+
+// runResolve marks the given comment ids resolved. It exits non-zero if any id
+// was unknown or already resolved.
+func runResolve(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: px0 resolve <id> [<id>...]")
+		return 1
+	}
+	s := newStore(cliRoot())
+	rc := 0
+	for _, id := range args {
+		n, err := s.resolve(id)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "px0:", err)
+			return 1
+		}
+		if n == 1 {
+			fmt.Printf("resolved %s\n", id)
+		} else {
+			fmt.Printf("no open comment %s\n", id)
+			rc = 1
+		}
+	}
+	return rc
 }
