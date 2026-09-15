@@ -104,7 +104,15 @@ func main() {
 	tel := NewTelemetryService(*noTelemetry)
 	defer tel.Close("normal")
 
-	srv := &http.Server{Handler: NewServer(ix, lsp)}
+	// baseCtx is the parent of every request context. Cancelling it on shutdown
+	// unblocks long-lived handlers (e.g. the SSE comment stream) so they return
+	// and Shutdown can drain instead of waiting out its timeout.
+	baseCtx, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+	srv := &http.Server{
+		Handler:     NewServer(ix, lsp),
+		BaseContext: func(net.Listener) context.Context { return baseCtx },
+	}
 
 	url := viewerURL(addr, initialFile, initialLine)
 	uiHeading("px0 "+version, nil, os.Stdout)
@@ -151,6 +159,7 @@ func main() {
 			<-stop // Second interrupt forces immediate exit
 			os.Exit(130)
 		}()
+		cancelBase() // release long-lived streams (SSE) so Shutdown can drain
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
